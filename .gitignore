@@ -1,0 +1,8 @@
+# env
+env
+venv
+venv*
+*venv*
+
+# media
+*.mp4

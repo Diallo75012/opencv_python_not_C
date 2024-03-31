@@ -1,0 +1,128 @@
+# OpenCV mouth events
+[
+  'EVENT_FLAG_ALTKEY', 
+  'EVENT_FLAG_CTRLKEY', 
+  'EVENT_FLAG_LBUTTON', 
+  'EVENT_FLAG_MBUTTON', 
+  'EVENT_FLAG_RBUTTON', 
+  'EVENT_FLAG_SHIFTKEY', 
+  'EVENT_LBUTTONDBLCLK', 
+  'EVENT_LBUTTONDOWN', 
+  'EVENT_LBUTTONUP', 
+  'EVENT_MBUTTONDBLCLK', 
+  'EVENT_MBUTTONDOWN', 
+  'EVENT_MBUTTONUP', 
+  'EVENT_MOUSEHWHEEL', 
+  'EVENT_MOUSEMOVE', 
+  'EVENT_MOUSEWHEEL', 
+  'EVENT_RBUTTONDBLCLK', 
+  'EVENT_RBUTTONDOWN', 
+  'EVENT_RBUTTONUP'
+]
+
+# writing image frame so saving it with a name, here taking prerrots.jog and saving it as starru_night.png
+img = cv.imread("/home/creditizens/Downloads/perrots.jpg")
+cv.imwrite("starry_night.png", img)
+
+# optional argument of cv.imread()
+first argument is the image path and second optional argument are those following:
+- IMREAD_COLOR loads the image in the BGR 8-bit format. This is the default that is used here.
+- IMREAD_UNCHANGED loads the image as is (including the alpha channel if present)
+- IMREAD_GRAYSCALE loads the image as an intensity one (good when want to modify, recognze, save or play with the image using lower size so not using all colors)
+
+# define codec to set a video writter
+fourcc = cv.VideoWriter_fourcc(*'mp4v')
+out = cv.VideoWriter('output.mp4', fourcc, 20.0, (640, 480))
+... # here is all the with and ret, frame stuff...then...:
+out.write(frame)
+
+# image blending, have two image one on top of the other with different opacity so that both can be seen
+img1 = cv.imread('image1.png')
+img2 = cv.imread('image2.png')
+dst = cv.addWeighted(img1,0.7,img2,0.3,0)
+
+##### this can be interesting to train opencv to find our custom signs/images in frames
+
+""" """ """ """ """ """ """ """ """ """
+
+# find matching images in another image
+# we can use a function from calib3d module, ie cv.findHomography().
+# If we pass the set of points from both the images, it will find the perspective transformation of that object.
+# Then we can use cv.perspectiveTransform() to find the object. It needs at least four correct points to find the transformation.
+# algorithm uses RANSAC or LEAST_MEDIAN (which can be decided by the flags).
+# So good matches which provide correct estimation are called inliers and remaining are called outliers.
+# cv.findHomography() returns a mask which specifies the inlier and outlier points.
+# so we find first SIFT features and apply best ratio
+import numpy as np
+import cv2 as cv
+from matplotlib import pyplot as plt
+
+MIN_MATCH_COUNT = 10
+
+img1 = cv.imread('/home/creditizens/Downloads/abstract_art.jpg', cv.IMREAD_GRAYSCALE) # queryImage
+img2 = cv.imread('/home/creditizens/Downloads/abstract_art_hidden_in_image.jpg', cv.IMREAD_GRAYSCALE) # trainImage
+
+# Initiate SIFT detector
+sift = cv.SIFT_create()
+
+# find the keypoints and descriptors with SIFT
+kp1, des1 = sift.detectAndCompute(img1, None)
+kp2, des2 = sift.detectAndCompute(img2, None)
+
+FLANN_INDEX_KDTREE = 1
+index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
+search_params = dict(checks = 50)
+
+flann = cv.FlannBasedMatcher(index_params, search_params)
+
+matches = flann.knnMatch(des1, des2, k=2)
+
+# store all the good matches as per Lowe's ratio test.
+good_matches = [m for m,n in matches if m.distance < 0.7*n.distance]
+print("GOOD Mathcing points: ", good_matches)
+
+# Now, we need to extract the keypoints that passed the ratio test
+# queryIdx (query descriptor index), trainIdx (train descriptor index), imgIdx (train image index), and distance (distance between descriptors).
+# These attributes help in identifying and utilizing matched keypoints between two sets of images.
+# Note: m.queryIdx for img1 (queryImage), m.trainIdx for img2 (trainImage)
+good_kp2 = [kp2[m.trainIdx] for m in good_matches]
+
+# Draw good keypoints on img2
+img2_with_matches = cv.drawKeypoints(img2, good_kp2, None, flags=cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS, color=(0,255,0))
+
+# Display the image with keypoints
+plt.imshow(img2_with_matches), plt.show()
+
+# OR we can use as decided earlier to check if at least 10 points are matching with the parameter MIN_MATCH_COUNT amd use findHomography function to find those point even if in the train image the queryImage is rotated or distorded, then plot it
+if len(good_matches) > MIN_MATCH_COUNT:
+  src_pts = np.float32([ kp1[m.queryIdx].pt for m in good_matches ]).reshape(-1,1,2)
+  dst_pts = np.float32([ kp2[m.trainIdx].pt for m in good_matches ]).reshape(-1,1,2)
+
+  M, mask = cv.findHomography(src_pts, dst_pts, cv.RANSAC,5.0)
+  matchesMask = mask.ravel().tolist()
+
+  h, w = img1.shape
+  pts = np.float32([ [0,0], [0,h-1], [w-1, h-1], [w-1,0] ]).reshape(-1,1,2)
+  dst = cv.perspectiveTransform(pts, M)
+
+  img2_matched_polylines_with_img1 = cv.polylines(img2, [np.int32(dst)],True,255,3, cv.LINE_AA)
+  print("Img2 new with mathced points downloaded to PWD folder")
+  # here we get a new image created with a rectangle showing where is the object that we query for: CAN BE USED TO RECOGNIZE HAND OR SIGN FROM VIDEO FRAME THAT WILL START A BACKGROUND ACTION
+  cv.imwrite('abstract_art_sift_keypoints_matched.jpg', img2_matched_polylines_with_img1)
+
+else:
+ print(f"Not enough matches are found - {len(good_matches)}/{MIN_MATCH_COUNT}")
+ matchesMask = None
+
+# OR can use this to plot mathcing points with line connecting those points having the images side by side queryImage|trainImage
+# flag=2 draw only inliers(matching) and not outliers
+draw_params = dict(matchColor = (0,255,0), singlePointColor = None, matchesMask=matchesMask, flags=2)
+img3 = cv.drawMatches(img1, kp1, img2, kp2, good_matches, None, **draw_params)
+
+# gray is a valid value for cmap (there so many other colors but we use that one as in documentation)
+# this will show the two images with the matching points joined by grenn lines to justify which point is mathcing which one from one image to the other
+plt.imshow(img3, 'gray'), plt.show()
+
+""" """ """ """ """ """ """ """ """ """
+
+#
